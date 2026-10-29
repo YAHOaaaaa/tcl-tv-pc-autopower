@@ -16,7 +16,7 @@ NVIDIA などの PC 用 GPU は HDMI-CEC を出せないので、テレビの「
 
 | 動作 | どこで動くか | 内容 |
 | --- | --- | --- |
-| テレビをオン | PC（`tv_on.ps1`） | 起動・ログオン・スリープ復帰時にタスク スケジューラ（SYSTEM）から実行。Wake-on-LAN → `adb connect` → スタンバイ前の入力が PC の HDMI なら `KEYCODE_WAKEUP` |
+| テレビをオン | PC（`tv_on.ps1`） | 起動・ログオン・スリープ復帰時にタスク スケジューラ（SYSTEM）から実行。`adb connect`（届かなければ Wake-on-LAN を送りながら約 3 分リトライ）→ スタンバイ前の入力が PC の HDMI なら `KEYCODE_WAKEUP` |
 | テレビをオフ | テレビ（`tvwatch.sh`） | テレビ内で常駐し、HDMI の信号イベントを `logcat` で監視。PC の信号が `NoSignalDelay` 秒（既定 20 秒）途絶えたら `KEYCODE_SLEEP` |
 
 `tv_on.ps1` の判断：
@@ -28,6 +28,8 @@ NVIDIA などの PC 用 GPU は HDMI-CEC を出せないので、テレビの「
 | 起動中 | 何もしない（入力は切り替えない） |
 
 スタンバイ中のテレビは入力 ID を返さないので、スタンバイに入る直前の入力を `tvwatch.sh` が `/data/local/tmp/tvwatch.input` に記録しています。
+
+Wake-on-LAN でテレビが画面ごと起きてしまい、しかも直前の入力が PC 以外だった場合は、`tv_on.ps1` がすぐスタンバイに戻します（数秒だけ画面が点きます）。
 
 `tvwatch.sh` は次の場合は何もしません。
 
@@ -41,7 +43,10 @@ NVIDIA などの PC 用 GPU は HDMI-CEC を出せないので、テレビの「
 - Windows 10 / 11
 - [Android SDK Platform-Tools](https://developer.android.com/tools/releases/platform-tools)（`adb.exe`）
 - テレビ側で **開発者向けオプション → ネットワーク デバッグ（ADB）** を有効にしておく
-- テレビの **設定 → システム → 電源と省エネ設定 → クイックスタート** をオン（スタンバイ中も ADB が届くようにするため）
+- テレビの **設定 → システム → 電源と省エネ設定 → クイックスタート** をオン
+- テレビの **設定 → ネットワークとインターネット → ネットワーク常時待機** をオン（**必須**）
+
+  テレビはスタンバイから約 90 秒で深いスタンバイ（STR）に入り、Wi-Fi が止まります。ネットワーク常時待機がオフだと、この状態のテレビには PC から何も届きません（Wake-on-LAN も効きません）。オンにすると、ADB の接続や Wake-on-LAN が届いたときにテレビのネットワークが復帰します（ログでは `mWakeupTypeWOW`）。
 - 電源オン時の画面は「前回使用した入力の画面」がおすすめです
 
 ## セットアップ

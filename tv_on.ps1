@@ -12,18 +12,24 @@ function Adb { & $Adb -P $P @args 2>&1 }
 
 Log "start (user=$env:USERNAME)"
 
-# Wake-on-LAN magic packet, in case the TV went into deep standby
-if ($TvMac) {
+# Wake-on-LAN magic packet. About 90 s into standby the TV suspends to RAM and drops off Wi-Fi;
+# with "ネットワーク常時待機" on, this packet resumes it (fully, screen on, back on its last input).
+$tvIp = $TvAddress.Split(':')[0]
+function Wol {
+  if (-not $TvMac) { return }
   try {
     $bytes = [byte[]](,0xFF * 6) + ((1..16) | ForEach-Object { $TvMac.Split('-:') | ForEach-Object { [Convert]::ToByte($_, 16) } })
     $udp = New-Object Net.Sockets.UdpClient; $udp.EnableBroadcast = $true
-    [void]$udp.Send($bytes, $bytes.Length, '255.255.255.255', 9); $udp.Close()
-  } catch { Log "WoL failed: $_" }
+    foreach ($dst in '255.255.255.255', ($tvIp -replace '\.\d+$', '.255'), $tvIp) { [void]$udp.Send($bytes, $bytes.Length, $dst, 9) }
+    $udp.Close()
+  } catch { }
 }
 
-# The network may not be up yet right after boot: retry for about two minutes
-$ok = $false
-for ($i = 0; $i -lt 40; $i++) {
+# Plain ADB first (awake or light standby). If the TV stays unreachable it is in deep standby,
+# or the PC's network is not up yet right after boot: keep sending WoL until it answers (about 3 minutes).
+$ok = $false; $wolSent = $false
+for ($i = 0; $i -lt 50; $i++) {
+  if ($i -ge 2) { Wol; $wolSent = $true }
   Adb connect $TvAddress | Out-Null
   $w = Adb -s $TvAddress shell "dumpsys power | grep -o 'mWakefulness=[A-Za-z]*'"
   if ($w -match 'mWakefulness=(\w+)') { $ok = $true; break }
@@ -32,6 +38,15 @@ for ($i = 0; $i -lt 40; $i++) {
 if (-not $ok) { Log "TV not reachable"; Adb kill-server | Out-Null; exit 1 }
 
 $state = $matches[1]
+# Woken by our WoL just now? (TCL logs the resume reason as mWakeupTypeWOW)
+$wokeByWol = $false
+if ($wolSent -and $state -eq 'Awake') {
+  $info = "$(Adb -s $TvAddress shell "logcat -d | grep -E 'mWakeupType' | tail -1; dumpsys power | grep -o 'mLastWakeTime=[0-9]* ([0-9]* ms ago)'")"
+  if ($info -match 'mWakeupTypeWOW' -and $info -match '\((\d+) ms ago\)' -and [int64]$matches[1] -lt 180000) {
+    $wokeByWol = $true
+    Start-Sleep 4   # let the TV bring its last screen back before reading the input
+  }
+}
 # Input on screen: HDMI ports report their hardware id, the Google TV home/apps report another id.
 # While asleep the TV reports the launcher's id, so use what tvwatch.sh recorded when the TV went to standby
 # (falling back to the TV's last-used tuner/HDMI input if the watcher was not running then).
@@ -40,7 +55,7 @@ if ($state -eq 'Awake') {
 } else {
   $lastInput = "$(Adb -s $TvAddress shell 'cat /data/local/tmp/tvwatch.input 2>/dev/null || settings get secure tcl_sys_tv_input_last_device_id')".Trim()
 }
-Log "TV state: $state, input: $lastInput"
+Log "TV state: $state, input: $lastInput$(if ($wokeByWol) { ' (woken by WoL)' })"
 
 # Start the watcher first so it sees the SignalLock that follows the wake-up
 $running = Adb -s $TvAddress shell "ps -A -o ARGS | grep -c '^sh /data/local/tmp/tvwatch.sh'"
@@ -53,12 +68,16 @@ if ("$running".Trim() -eq '0') {
 
 # Never change the input: only wake the TV when it will come back on the PC's HDMI port.
 # If someone left it on another HDMI port or a Google TV app, leave the TV alone.
-if ($lastInput -ne "$HdmiHardwareId") {
+if ($wokeByWol -and $lastInput -ne "$HdmiHardwareId") {
+  # WoL had to wake it to reach it, but it was on something else: put it back to standby
+  Adb -s $TvAddress shell "input keyevent KEYCODE_SLEEP" | Out-Null
+  Log "done: woken by WoL onto HW$lastInput, put back to standby"
+} elseif ($lastInput -ne "$HdmiHardwareId") {
   Log "done: last input is not HW$HdmiHardwareId, TV left as is"
 } elseif ($state -ne 'Awake') {
   Adb -s $TvAddress shell "input keyevent KEYCODE_WAKEUP" | Out-Null
   Log "done: woke TV on HW$HdmiHardwareId"
 } else {
-  Log "done: TV already on HW$HdmiHardwareId"
+  Log "done: TV on HW$HdmiHardwareId$(if ($wokeByWol) { ' (woken by WoL)' } else { ' already' })"
 }
 Adb kill-server | Out-Null
