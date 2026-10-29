@@ -3,9 +3,13 @@
 # Puts the TV to sleep when the PC's HDMI input loses signal for DELAY seconds.
 # Only acts when the signal was present before (state "ok") and that HDMI input is the current one,
 # so turning the TV on by remote while the PC is off, or watching another input, is left alone.
-#   usage: sh tvwatch.sh [HDMI_HARDWARE_ID=15] [DELAY_SECONDS=20]
+# Also wakes the TV the moment the PC's GPU raises HDMI hotplug at power-on (seconds after the
+# power button, long before Windows runs), if the TV went to standby showing the PC. This only
+# works while the TV is in light standby: about 90 s in it suspends to RAM and stops seeing hotplug.
+#   usage: sh tvwatch.sh [HDMI_HARDWARE_ID=15] [DELAY_SECONDS=20] [HDMI_PORT=HW-14]
 HW=${1:-15}
 DELAY=${2:-20}
+PORT=${3:-$((HW - 14))}
 DIR=/data/local/tmp
 STATE=$DIR/tvwatch.state
 echo $$ > $DIR/tvwatch.pid
@@ -39,8 +43,13 @@ esac
   done
 ) &
 
-logcat -T 1 -s VCodecHdmi:D TvPassThroughSession:I | while read -r line; do
+logcat -T 1 -s VCodecHdmi:D TvPassThroughSession:I TclHdmiControlService:D | while read -r line; do
   case "$line" in
+    *"onHotplug portId=$PORT connected=true"*)
+      if ! dumpsys power | grep -q 'mWakefulness=Awake' && [ "$(cat $DIR/tvwatch.input 2>/dev/null)" = "$HW" ]; then
+        echo "$(date) PC hotplug on HDMI$PORT -> wake" >> $DIR/tvwatch.log
+        input keyevent KEYCODE_WAKEUP
+      fi ;;
     *"SignalLock mHardwareDeviceId=$HW"*)
       echo ok > $STATE ;;
     *"signalChangeHandler[1197]"*"0(Stable)"*)

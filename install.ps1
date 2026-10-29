@@ -17,7 +17,7 @@ $xml = @"
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo><Description>Wake the TCL TV over ADB and switch to the PC's HDMI input ($script)</Description></RegistrationInfo>
   <Triggers>
-    <BootTrigger><Delay>PT10S</Delay><Enabled>true</Enabled></BootTrigger>
+    <BootTrigger><Enabled>true</Enabled></BootTrigger>
     <LogonTrigger><Enabled>true</Enabled></LogonTrigger>
     <EventTrigger><Enabled>true</Enabled><Subscription>$(& $event 'Microsoft-Windows-Power-Troubleshooter' 1)</Subscription></EventTrigger>
     <EventTrigger><Enabled>true</Enabled><Subscription>$(& $event 'Microsoft-Windows-Kernel-General' 12)</Subscription></EventTrigger>

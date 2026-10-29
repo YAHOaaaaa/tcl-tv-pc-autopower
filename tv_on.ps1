@@ -25,16 +25,25 @@ function Wol {
   } catch { }
 }
 
-# Plain ADB first (awake or light standby). If the TV stays unreachable it is in deep standby,
-# or the PC's network is not up yet right after boot: keep sending WoL until it answers (about 3 minutes).
-$ok = $false; $wolSent = $false
-for ($i = 0; $i -lt 50; $i++) {
-  if ($i -ge 2) { Wol; $wolSent = $true }
-  Adb connect $TvAddress | Out-Null
-  $w = Adb -s $TvAddress shell "dumpsys power | grep -o 'mWakefulness=[A-Za-z]*'"
-  if ($w -match 'mWakefulness=(\w+)') { $ok = $true; break }
-  Start-Sleep 3
+# Probe the ADB port with a short timeout (adb connect to an unreachable host waits for seconds).
+# Open at once: the TV is awake or in light standby. Otherwise it is in deep standby, or the PC's
+# network is not up yet right after boot: send WoL every second until the port answers (about 3 minutes).
+$tvPort = [int]$TvAddress.Split(':')[1]
+function PortOpen {
+  $c = New-Object Net.Sockets.TcpClient
+  try { $t = $c.ConnectAsync($tvIp, $tvPort); return ($t.Wait(800) -and $c.Connected) } catch { return $false } finally { $c.Close() }
 }
+$ok = $false; $wolSent = $false
+for ($i = 0; $i -lt 180; $i++) {
+  if (PortOpen) {
+    Adb connect $TvAddress | Out-Null
+    $w = Adb -s $TvAddress shell "dumpsys power | grep -o 'mWakefulness=[A-Za-z]*'"
+    if ($w -match 'mWakefulness=(\w+)') { $ok = $true; break }
+  }
+  Wol; $wolSent = $true
+  Start-Sleep -Milliseconds 200
+}
+Log "TV reachable after $i probe(s)"
 if (-not $ok) { Log "TV not reachable"; Adb kill-server | Out-Null; exit 1 }
 
 $state = $matches[1]
@@ -57,8 +66,17 @@ if ($state -eq 'Awake') {
 }
 Log "TV state: $state, input: $lastInput$(if ($wokeByWol) { ' (woken by WoL)' })"
 
-# Start the watcher first so it sees the SignalLock that follows the wake-up
+# Start the watcher first so it sees the SignalLock that follows the wake-up.
+# Replace it when the copy on the TV differs from this one (after an update).
+$localHash = (Get-FileHash "$PSScriptRoot\tvwatch.sh" -Algorithm MD5).Hash.ToLower()
+$tvHash = "$(Adb -s $TvAddress shell 'md5sum /data/local/tmp/tvwatch.sh 2>/dev/null')".Split(' ')[0]
 $running = Adb -s $TvAddress shell "ps -A -o ARGS | grep -c '^sh /data/local/tmp/tvwatch.sh'"
+if ("$running".Trim() -ne '0' -and $tvHash -ne $localHash) {
+  # [t]vwatch / [l]ogcat: the patterns do not match this pkill's own command line
+  Adb -s $TvAddress shell "pkill -f '[t]vwatch.sh'; pkill -f '[l]ogcat -T 1 -s VCodecHdmi'" | Out-Null
+  $running = '0'
+  Log "tvwatch outdated, restarting"
+}
 if ("$running".Trim() -eq '0') {
   Adb -s $TvAddress push "$PSScriptRoot\tvwatch.sh" /data/local/tmp/tvwatch.sh | Out-Null
   Adb -s $TvAddress shell "chmod 755 /data/local/tmp/tvwatch.sh; setsid nohup sh /data/local/tmp/tvwatch.sh $HdmiHardwareId $NoSignalDelay >/dev/null 2>&1 </dev/null &" | Out-Null

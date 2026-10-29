@@ -18,6 +18,7 @@ NVIDIA などの PC 用 GPU は HDMI-CEC を出せないので、テレビの「
 | --- | --- | --- |
 | テレビをオン | PC（`tv_on.ps1`） | 起動・ログオン・スリープ復帰時にタスク スケジューラ（SYSTEM）から実行。`adb connect`（届かなければ Wake-on-LAN を送りながら約 3 分リトライ）→ スタンバイ前の入力が PC の HDMI なら `KEYCODE_WAKEUP` |
 | テレビをオフ | テレビ（`tvwatch.sh`） | テレビ内で常駐し、HDMI の信号イベントを `logcat` で監視。PC の信号が `NoSignalDelay` 秒（既定 20 秒）途絶えたら `KEYCODE_SLEEP` |
+| テレビをオン（即時） | テレビ（`tvwatch.sh`） | スタンバイ中に PC の HDMI ホットプラグ（`TclHdmiControlService` の `onHotplug`）を検知したら `KEYCODE_WAKEUP`（スタンバイ前の入力が PC の HDMI だった場合だけ） |
 
 `tv_on.ps1` の判断：
 
@@ -30,6 +31,23 @@ NVIDIA などの PC 用 GPU は HDMI-CEC を出せないので、テレビの「
 スタンバイ中のテレビは入力 ID を返さないので、スタンバイに入る直前の入力を `tvwatch.sh` が `/data/local/tmp/tvwatch.input` に記録しています。
 
 Wake-on-LAN でテレビが画面ごと起きてしまい、しかも直前の入力が PC 以外だった場合は、`tv_on.ps1` がすぐスタンバイに戻します（数秒だけ画面が点きます）。
+
+### テレビが点くまでの速さ
+
+PC の電源を入れると、GPU は起動画面（POST）の段階で HDMI のホットプラグ信号を出します。Windows が動き出すより 20 秒ほど前です。
+
+| テレビの状態 | テレビを起こすもの | 目安 |
+| --- | --- | --- |
+| 浅いスタンバイ（PC を切ってから約 90 秒以内。再起動など） | `tvwatch.sh` がホットプラグを検知 | PC の電源投入から数秒（検知から約 1 秒） |
+| 深いスタンバイ（それ以降） | Windows 起動後に `tv_on.ps1` が Wake-on-LAN | Windows が起動してネットワークがつながり次第 |
+
+深いスタンバイ中のテレビは CPU が止まっていてホットプラグを処理しません。TCL の電源管理には「画面だけ消して本体は動かし続ける」フェイクスタンバイもありますが、システム権限（`tcl.permission.ACCESS_EXTENDED_POWER`）が必要で、ADB のシェルからは使えません。
+
+深いスタンバイからさらに速くするには：
+
+- PC の BIOS/UEFI で Fast Boot を有効にする（POST の短縮）
+- PC を有線 LAN にする（Wi-Fi は起動後の接続に時間がかかります）
+- PC の電源投入と同時に CEC を出せる USB-CEC アダプター（Pulse-Eight など）を使う
 
 `tvwatch.sh` は次の場合は何もしません。
 
