@@ -18,23 +18,36 @@ case "$last" in
 esac
 
 # Sleep watcher: when the TV goes to standby, forget the old "signal present" state
-# (writing on the way down avoids racing the SignalLock event that follows a wake-up).
+# (writing on the way down avoids racing the SignalLock event that follows a wake-up),
+# and record which input was on screen so tv_on.ps1 only wakes the TV back onto the PC.
+# The TV flips the current input id to the launcher's id as it falls asleep,
+# so the sample from one poll earlier is the one written.
 (
   prev=Awake
+  in_cur=; in_prev=
   while true; do
     now=$(dumpsys power | grep -o 'mWakefulness=[A-Za-z]*' | cut -d= -f2)
-    if [ "$prev" = Awake ] && [ "$now" != Awake ]; then echo woke > $STATE; fi
+    if [ "$now" = Awake ]; then
+      in_prev=$in_cur
+      in_cur=$(settings get secure tcl_sys_tv_input_current_device_id)
+    elif [ "$prev" = Awake ]; then
+      echo woke > $STATE
+      echo "${in_prev:-$in_cur}" > $DIR/tvwatch.input
+    fi
     prev=$now
-    sleep 5
+    sleep 2
   done
 ) &
 
 logcat -T 1 -s VCodecHdmi:D TvPassThroughSession:I | while read -r line; do
   case "$line" in
-    *"signalChangeHandler[1197]"*"0(Stable)"*|*"SignalLock mHardwareDeviceId=$HW"*)
+    *"SignalLock mHardwareDeviceId=$HW"*)
       echo ok > $STATE ;;
+    *"signalChangeHandler[1197]"*"0(Stable)"*)
+      # VCodecHdmi reports every HDMI port: only count it when the PC's port is the current input
+      if [ "$(settings get secure tcl_sys_tv_input_current_device_id)" = "$HW" ]; then echo ok > $STATE; else echo other > $STATE; fi ;;
     *"signalChangeHandler[1197]"*"1(UnStable)"*)
-      [ "$(cat $STATE)" = woke ] || echo unstable > $STATE ;;
+      case "$(cat $STATE)" in ok|nosig*) echo unstable > $STATE ;; esac ;;
     *"signalChangeHandler[1197]"*"2(NoSignal)"*)
       prev=$(cat $STATE)
       if [ "$prev" = ok ] || [ "$prev" = unstable ]; then
