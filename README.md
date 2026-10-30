@@ -79,7 +79,8 @@ PC の電源を入れると、GPU は起動画面（POST）の段階で HDMI の
 
    - `TvAddress`：テレビの IP:ポート
    - `TvMac`：テレビの MAC アドレス（Wake-on-LAN 用、不要なら空）
-   - `AdbKey`：手順 1 で許可された adb の秘密鍵（例 `C:\Users\あなた\.android\adbkey`）。SYSTEM で動くので絶対パスで書きます
+   - `Adb`：`adb.exe` のパス
+   - `AdbKey`：手順 1 で許可された adb の秘密鍵（例 `C:\Users\あなた\.android\adbkey`）
    - `HdmiHardwareId`：PC をつないだ HDMI 端子（TCL は HDMI1=15, HDMI2=16, HDMI3=17, HDMI4=18）
 
 3. 管理者の PowerShell で実行します。
@@ -88,11 +89,25 @@ PC の電源を入れると、GPU は起動画面（POST）の段階で HDMI の
    powershell -ExecutionPolicy Bypass -File .\install.ps1
    ```
 
-   タスク「TV-Power-On」が登録され、すぐに 1 回実行されます。
+   `C:\Program Files\tcl-tv-pc-autopower` にインストールされ、タスク「TV-Power-On」が登録されて、すぐに 1 回実行されます。
+   `config.ps1` を変えたときは、もう一度 `install.ps1` を実行してください。
+
+### セキュリティ
+
+タスクは SYSTEM 権限で動きます。実行するファイルを一般ユーザーが書き換えられると、管理者でなくても SYSTEM 権限でコードを実行できてしまいます。
+そこで `install.ps1` は、タスクが実行・読み込みするもの（`tv_on.ps1`、生成した `config.ps1`、`tvwatch.sh`、`adb.exe` とその DLL、adb の秘密鍵）をすべて `C:\Program Files\tcl-tv-pc-autopower` にコピーし、次のアクセス権にします。
+
+| 対象 | SYSTEM・Administrators | Users |
+| --- | --- | --- |
+| `C:\Program Files\tcl-tv-pc-autopower` | フルコントロール | 読み取りと実行のみ |
+| その中の `adbkey`（秘密鍵） | フルコントロール | アクセス不可 |
+| `C:\ProgramData\tcl-tv-pc-autopower`（ログ） | フルコントロール | 読み取りのみ |
+
+ダウンロードしたフォルダ（`config.ps1` を書いた場所）は、インストール後はタスクから使われません。
 
 ## 確認
 
-- PC 側のログ：`tv_on.log`
+- PC 側のログ：`C:\ProgramData\tcl-tv-pc-autopower\tv_on.log`
 - テレビ側の状態：
 
   ```bash
@@ -101,7 +116,7 @@ PC の電源を入れると、GPU は起動画面（POST）の段階で HDMI の
 
 ## アンインストール
 
-管理者の PowerShell で実行します。
+管理者の PowerShell で実行します。タスク、テレビ上の `tvwatch.sh`、`C:\Program Files\tcl-tv-pc-autopower` と `C:\ProgramData\tcl-tv-pc-autopower` を削除します。
 
 ```bash
 powershell -ExecutionPolicy Bypass -File .\uninstall.ps1

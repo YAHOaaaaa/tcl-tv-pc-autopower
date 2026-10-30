@@ -1,10 +1,10 @@
 # PC startup / logon / resume: wake the TCL TV over ADB when its last input is the PC's HDMI port,
 # and make sure tvwatch.sh runs on the TV.
-# Runs as SYSTEM from the "TV-Power-On" scheduled task, so it uses its own adb server port
-# and the adb key named in config.ps1.
+# Runs as SYSTEM from the "TV-Power-On" scheduled task, out of the administrators-only folder that
+# install.ps1 creates, so it uses its own adb server port and the adb key named in config.ps1.
 $ErrorActionPreference = 'Continue'
 . "$PSScriptRoot\config.ps1"
-$log = "$PSScriptRoot\tv_on.log"
+$log = if ($LogFile) { $LogFile } else { "$PSScriptRoot\tv_on.log" }
 $env:ADB_VENDOR_KEYS = $AdbKey
 $P = '5039'
 function Log($m) { "$(Get-Date -Format s) $m" | Out-File $log -Append -Encoding utf8 }

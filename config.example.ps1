@@ -1,5 +1,6 @@
-# Copy this file to config.ps1 and fill in your values.
-# tv_on.ps1 runs as SYSTEM, so every path here must be absolute (no $env:USERPROFILE).
+# Copy this file to config.ps1 and fill in your values, then run install.ps1 (as administrator).
+# install.ps1 copies adb and the key below into an administrators-only folder and writes the
+# config the SYSTEM task actually uses there; run it again after editing this file.
 
 # adb.exe from Android SDK Platform-Tools
 $Adb = 'C:\platform-tools\adb.exe'
